@@ -291,43 +291,43 @@ void loop()
     const int FACTOR = 2;
     for(byte chan = 0; chan < MAX_CHANNELS; chan++)
     {
-		//get LED mapping
-		int green_led = (chan * FACTOR);
-		int red_led = (chan * FACTOR) + 1;
-			
-		if(0 == g_setLimit)
-		{
-			Serial.print("ADC");
-			Serial.print(chan);
-			Serial.print(":");
-			Serial.println(g_adcReadings[chan]);
-			delay(300);
-			toggleLEDs(green_led, LOW);
-			toggleLEDs(red_led, LOW);
-			ioExp3_U302.digitalWrite0(BUZZER_PIN, LOW);
-			delay(300);
-			toggleLEDs(green_led, HIGH);
-			toggleLEDs(red_led, HIGH);
-			ioExp3_U302.digitalWrite0(BUZZER_PIN, HIGH);
-			delay(300);
-		}
-		else if(INVALID_VOLT != g_setLimit)
-		{
-			//over voltage detected
-			if(g_adcReadings[chan] > VoltLimit[g_setLimit])
-			{
-				ioExp3_U302.digitalWrite0(BUZZER_PIN, LOW);
-				
-				toggleLEDs(green_led, LOW);
-				toggleLEDs(red_led, HIGH);
-			}
-			else //normal voltage 
-			{
-				ioExp3_U302.digitalWrite0(BUZZER_PIN, HIGH);
-				
-				toggleLEDs(red_led, LOW);
-				toggleLEDs(green_led, HIGH);
-			}
-		}
+        //get LED mapping
+        int green_led = (chan * FACTOR);
+        int red_led = (chan * FACTOR) + 1;
+            
+        if(0 == g_setLimit)
+        {
+            Serial.print("ADC");
+            Serial.print(chan);
+            Serial.print(":");
+            Serial.println(g_adcReadings[chan]);
+            delay(300);
+            toggleLEDs(green_led, LOW);
+            toggleLEDs(red_led, LOW);
+            ioExp3_U302.digitalWrite0(BUZZER_PIN, LOW);
+            delay(300);
+            toggleLEDs(green_led, HIGH);
+            toggleLEDs(red_led, HIGH);
+            ioExp3_U302.digitalWrite0(BUZZER_PIN, HIGH);
+            delay(300);
+        }
+        else if(INVALID_VOLT != g_setLimit)
+        {
+            //over voltage detected
+            if(g_adcReadings[chan] > VoltLimit[g_setLimit])
+            {
+                ioExp3_U302.digitalWrite0(BUZZER_PIN, LOW);
+                
+                toggleLEDs(green_led, LOW);
+                toggleLEDs(red_led, HIGH);
+            }
+            else //normal voltage 
+            {
+                ioExp3_U302.digitalWrite0(BUZZER_PIN, HIGH);
+                
+                toggleLEDs(red_led, LOW);
+                toggleLEDs(green_led, HIGH);
+            }
+        }
     }
 }
