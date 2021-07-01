@@ -29,6 +29,8 @@ const int CHECK_MS = 10;
 const byte MAX_CHANNELS = 18;
 const byte MAX_LED = MAX_CHANNELS*2;
 
+const byte INVALID_VOLT = 0xFF;
+
 enum _Volt_config
 {
   CFG_7V,
@@ -87,7 +89,7 @@ DTIOI2CtoParallelConverter ioExp3_U302(0x76);  //PCA9539 I/O Expander (with A1 =
 LiquidCrystal_I2C lcd(0x38, 4, 5, 6, 0, 1, 2, 3, 7, POSITIVE);
 
 static byte g_debouncedBtnState = 1;
-static byte g_selectVolt = 0;
+static byte g_selectVolt = INVALID_VOLT;
 static byte g_setLimit = 0;
 static reg_map_io_expandr_t g_LEDMappingArr[MAX_LED] = {};
 static int g_LEDcount = 0;
@@ -309,7 +311,7 @@ void loop()
 			ioExp3_U302.digitalWrite0(BUZZER_PIN, HIGH);
 			delay(300);
 		}
-		else
+		else if(INVALID_VOLT != g_setLimit)
 		{
 			//over voltage detected
 			if(g_adcReadings[chan] > VoltLimit[g_setLimit])
