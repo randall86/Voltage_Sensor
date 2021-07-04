@@ -82,8 +82,8 @@ Adafruit_MCP3008 adc2_U3;
 Adafruit_MCP3008 adc3_U4;
 
 DTIOI2CtoParallelConverter ioExp1_U300(0x74);  //PCA9539 I/O Expander (with A1 = 0 and A0 = 0)
-DTIOI2CtoParallelConverter ioExp2_U301(0x75);  //PCA9539 I/O Expander (with A1 = 0 and A0 = 1)
-DTIOI2CtoParallelConverter ioExp3_U302(0x76);  //PCA9539 I/O Expander (with A1 = 1 and A0 = 0)
+DTIOI2CtoParallelConverter ioExp2_U301(0x76);  //PCA9539 I/O Expander (with A1 = 0 and A0 = 1)
+DTIOI2CtoParallelConverter ioExp3_U302(0x75);  //PCA9539 I/O Expander (with A1 = 1 and A0 = 0)
 
 // The LCD constructor - I2C address 0x38
 LiquidCrystal_I2C lcd(0x38, 4, 5, 6, 0, 1, 2, 3, 7, POSITIVE);
