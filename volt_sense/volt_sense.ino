@@ -114,26 +114,26 @@ void toggleLEDs(int num_LED, bool on)
 void initLEDsOnExpandr(DTIOI2CtoParallelConverter *io_expandr)
 {
     //init LEDs on P0x bus
-    for(int P0_count = PIN1_7; ((P0_count >= PIN1_0) && (g_LEDcount < MAX_LED)); P0_count--)
+    for(int P1_count = PIN1_7; ((P1_count >= PIN1_0) && (g_LEDcount < MAX_LED)); P1_count--)
     {
-        io_expandr->pinMode0(P0_count, LOW);
-        io_expandr->digitalWrite0(P0_count, HIGH);        
+        io_expandr->pinMode1(P1_count, LOW);
+        io_expandr->digitalWrite1(P1_count, HIGH);        
         
         g_LEDMappingArr[g_LEDcount].expandr = io_expandr;
-        g_LEDMappingArr[g_LEDcount].expandr_bus = 0;
-        g_LEDMappingArr[g_LEDcount].expandr_pin = P0_count;
+        g_LEDMappingArr[g_LEDcount].expandr_bus = 1;
+        g_LEDMappingArr[g_LEDcount].expandr_pin = P1_count;
         g_LEDcount++;
     }
 
     //init LEDs on P1x bus
-    for(int P1_count = PIN0_7; ((P1_count >= PIN0_0) && (g_LEDcount < MAX_LED)); P1_count--)
+    for(int P0_count = PIN0_7; ((P0_count >= PIN0_0) && (g_LEDcount < MAX_LED)); P0_count--)
     {
-        io_expandr->pinMode1(P1_count, LOW);
-        io_expandr->digitalWrite1(P1_count, HIGH);
+        io_expandr->pinMode0(P0_count, LOW);
+        io_expandr->digitalWrite0(P0_count, HIGH);
 
         g_LEDMappingArr[g_LEDcount].expandr = io_expandr;
-        g_LEDMappingArr[g_LEDcount].expandr_bus = 1;
-        g_LEDMappingArr[g_LEDcount].expandr_pin = P1_count;
+        g_LEDMappingArr[g_LEDcount].expandr_bus = 0;
+        g_LEDMappingArr[g_LEDcount].expandr_pin = P0_count;
         g_LEDcount++;
     }
 }
