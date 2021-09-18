@@ -1,5 +1,5 @@
 // Voltage Sensor System
-// Rev 1.0 (26/06/2021)
+// Rev 2.0 (19/09/2021)
 // - Maxtrax
 
 #include <Adafruit_MCP3008.h>
@@ -9,7 +9,7 @@
 #include <Wire.h>
 #include <Scheduler.h>
 
-const char * app_ver = "v1.0";
+const char * app_ver = "v2.0";
 
 const byte ROTARY_CLK = 3;  //Output A
 const byte ROTARY_DT = 4;   //Output B
@@ -25,46 +25,86 @@ const byte BUZZER_PIN = PIN0_7;
 
 const int DEBOUNCE_MS = 50;
 const int CHECK_MS = 10;
-
+const int DELAY_MS = 100;
+ 
 const byte MAX_CHANNELS = 18;
 const byte MAX_LED = MAX_CHANNELS*2;
-
+const byte MAX_GROUPING = MAX_CHANNELS/2;
+const byte MAX_PROFILE = 20;
 const byte INVALID_VOLT = 0xFF;
 
 enum _Volt_config
 {
-  CFG_7V,
-  CFG_9V,
-  CFG_12V,
-  CFG_15V,
-  CFG_25V,
-  CFG_TEST,
-  CFG_MAX
+    CFG_10V,
+    CFG_25V,
+    CFG_50V,
+    CFG_80V,
+    CFG_100V,
+    CFG_120V,
+    CFG_150V,
+    CFG_180V,
+    CFG_200V,
+    CFG_220V,
+    CFG_250V,
+    CFG_280V,
+    CFG_300V,
+    MAX_CFG
 };
 
-const char *VoltLimitMsg[CFG_MAX] =
+enum _Volt_states
 {
-  "7V ",
-  "9V ",
-  "12V",
-  "15V",
-  "25V",
-  "TST"
+    INIT,
+    START,
+    STOP,
+    ACK,
+    CFG,
+    TEST,
+    MAX_STATE
 };
 
-int VoltLimit[CFG_MAX] =
+enum _Stop_states
 {
-  25,
-  30,
-  45,
-  50,
-  80,
-  0
+    RESUME,
+    RESET,
+    RECONFIG,
+    MAX_STOP_STATE
 };
 
-//analog volt calculation
-//val=(adc_data/MAX)*ref_volt
-//volt=(val/div_ratio)
+const char *StateMsg[MAX_STATE] =
+{
+  "Ready",
+  "Sensing...",
+  "Stopped",
+  "Acknowledged",
+  "Configuration",
+  "Testing"
+};
+
+const char *StoppedStateMsg[MAX_STOP_STATE] =
+{
+  "Resume?",
+  "Reset?",
+  "Reconfigure?"
+};
+
+typedef struct _chan_val_limit
+{
+    int chan_val;
+    int volt_lower_limit;
+    int volt_upper_limit;
+}chan_val_limit_t;
+
+typedef struct _volt_cfg
+{
+    int min_volt;
+    int max_volt;
+}volt_cfg_t;
+
+typedef struct _volt_profile
+{
+    int vb_profile;
+    int vc_profile;
+}volt_profile_t;
 
 typedef struct _reg_map_io_expandr_t
 {
@@ -89,12 +129,62 @@ DTIOI2CtoParallelConverter ioExp3_U302(0x75);  //PCA9539 I/O Expander (with A1 =
 LiquidCrystal_I2C lcd(0x38, 4, 5, 6, 0, 1, 2, 3, 7, POSITIVE);
 
 static byte g_debouncedBtnState = 1;
-static byte g_selectVolt = INVALID_VOLT;
-static byte g_setLimit = 0;
+static bool g_switchPressed = false;
 static reg_map_io_expandr_t g_LEDMappingArr[MAX_LED] = {};
 static int g_LEDcount = 0;
 static int g_chanCount = 0;
-static int g_adcReadings[MAX_CHANNELS] = {};
+static chan_val_limit_t g_adcReadings[MAX_CHANNELS] = {};
+static byte g_currentState = INIT;
+static bool g_faultDetected = false;
+static int g_newPos = 0;
+static int g_selectGroup = 0;
+static int g_groupProfile[MAX_GROUPING] = {};
+
+//ADC calculated values with 5% tolerance
+static const volt_cfg_t g_config[MAX_CFG] =
+{
+    {32, 36},       //10V
+    {81, 90},       //25V
+    {162, 179},     //50V
+    {259, 286},     //80V
+    {324, 358},     //100V
+    {389, 430},     //120V
+    {486, 537},     //150V
+    {583, 644},     //180V
+    {648, 716},     //200V
+    {713, 788},     //220V
+    {810, 895},     //250V
+    {907, 1003},    //280V
+    {972, 1023}     //300V
+};
+
+static const volt_profile_t g_profile[MAX_PROFILE] =
+{
+    {CFG_10V, CFG_50V},
+    {CFG_10V, CFG_100V},
+    {CFG_25V, CFG_80V},
+    {CFG_25V, CFG_120V},
+    {CFG_50V, CFG_100V},
+    {CFG_50V, CFG_150V}, 
+    {CFG_80V, CFG_200V}, 
+    {CFG_80V, CFG_220V}, 
+    {CFG_100V, CFG_120V}, 
+    {CFG_100V, CFG_200V}, 
+    {CFG_120V, CFG_150V}, 
+    {CFG_120V, CFG_180V},
+    {CFG_150V, CFG_180V},
+    {CFG_150V, CFG_200V}, 
+    {CFG_180V, CFG_200V}, 
+    {CFG_200V, CFG_220V}, 
+    {CFG_220V, CFG_250V}, 
+    {CFG_250V, CFG_280V}, 
+    {CFG_250V, CFG_300V},
+    {CFG_280V, CFG_300V} 
+};
+
+#define FACTOR 2
+#define GRN_LED(chan) (chan * FACTOR)
+#define RED_LED(chan) ((chan * FACTOR) + 1)
 
 void toggleLEDs(int num_LED, bool on)
 {
@@ -117,7 +207,7 @@ void initLEDsOnExpandr(DTIOI2CtoParallelConverter *io_expandr)
     for(int P1_count = PIN1_7; ((P1_count >= PIN1_0) && (g_LEDcount < MAX_LED)); P1_count--)
     {
         io_expandr->pinMode1(P1_count, LOW);
-        io_expandr->digitalWrite1(P1_count, HIGH);        
+        io_expandr->digitalWrite1(P1_count, LOW);        
         
         g_LEDMappingArr[g_LEDcount].expandr = io_expandr;
         g_LEDMappingArr[g_LEDcount].expandr_bus = 1;
@@ -129,7 +219,7 @@ void initLEDsOnExpandr(DTIOI2CtoParallelConverter *io_expandr)
     for(int P0_count = PIN0_7; ((P0_count >= PIN0_0) && (g_LEDcount < MAX_LED)); P0_count--)
     {
         io_expandr->pinMode0(P0_count, LOW);
-        io_expandr->digitalWrite0(P0_count, HIGH);
+        io_expandr->digitalWrite0(P0_count, LOW);
 
         g_LEDMappingArr[g_LEDcount].expandr = io_expandr;
         g_LEDMappingArr[g_LEDcount].expandr_bus = 0;
@@ -146,17 +236,13 @@ void displayStartMsg()
     lcd.print(app_ver);
     delay(1000);
     lcd.clear();
-    lcd.setCursor(0,0);
-    lcd.print("Select: NA");
-    lcd.setCursor(0,1);
-    lcd.print("Set Limit: 7V");
 }
 
 void readADC(Adafruit_MCP3008 *adc)
 {
     for(byte chan = 0; ((chan < 8) && (g_chanCount < MAX_CHANNELS)); chan++)
     {
-        g_adcReadings[g_chanCount++] = adc->readADC(chan);
+        g_adcReadings[g_chanCount++].chan_val = adc->readADC(chan);
     }
 }
 
@@ -173,28 +259,31 @@ void pollADC()
 
 void pollingRotary() 
 {
-    static int pos = 0;
     encoder.tick();
     
     int newPos = encoder.getPosition();
-    if (pos != newPos)
+    if (g_newPos != newPos)
     {
-        if(0 <= newPos)
-        {
-            g_selectVolt = (newPos % CFG_MAX);
-        }
-        else
-        {
-            g_selectVolt = (CFG_MAX - (abs(newPos) % CFG_MAX)) % CFG_MAX;
-        }
-        
-        lcd.setCursor(8,0);
-        lcd.print(VoltLimitMsg[g_selectVolt]);
-        
-        pos = newPos;
+        g_newPos = newPos;
     }
     
     yield(); //yield to pass control to other tasks
+}
+
+int getRotarySelection(int pos, int max)
+{
+    int ret = 0;
+    
+    if(0 <= pos)
+    {
+        ret = (pos % max);
+    }
+    else
+    {
+        ret = (max - (abs(pos) % max)) % max;
+    }
+    
+    return ret;
 }
 
 //returns true if state changed
@@ -234,18 +323,248 @@ void debounceBtnSWRoutine()
 {
     byte switch_state = 0;
     
-    //if door state changed, update the state
     if(debounceBtnSw(&switch_state))
     {
         if(!switch_state)
         {
-            g_setLimit = g_selectVolt;
-            lcd.setCursor(11,1);
-            lcd.print(VoltLimitMsg[g_setLimit]);
+            g_switchPressed = true;
         }
     }
     
     delay(CHECK_MS);
+}
+
+void printGroupProfileSelection()
+{
+    char text[16] = {};
+    //GroupX ProfXX
+    snprintf(text, 16, "Group%d Prof%02d  ", g_selectGroup+1, g_groupProfile[g_selectGroup]+1);
+    
+    lcd.setCursor(0,1);
+    lcd.print(text);
+}
+
+void prepareSensingState()
+{
+    static bool do_once = false;
+    
+    if(!do_once)
+    {
+        //initialize all channel volt limits according to the selected group profile
+        for(byte group = 0; group < MAX_GROUPING; group++)
+        {
+            //get selected profile for group
+            if(g_groupProfile[group] < MAX_PROFILE)
+            {
+                int vb = g_profile[g_groupProfile[group]].vb_profile;
+                int vc = g_profile[g_groupProfile[group]].vc_profile;
+                
+                //assign limit for vb channel in group
+                int vb_offset = (group * 2);
+                if(vb_offset < MAX_CHANNELS)
+                {
+                    g_adcReadings[vb_offset].volt_lower_limit = g_config[vb].min_volt;
+                    g_adcReadings[vb_offset].volt_upper_limit = g_config[vb].max_volt;
+                }
+                
+                //assign limit for vc channel in group
+                int vc_offset = vb_offset + 1;
+                if(vc_offset < MAX_CHANNELS)
+                {
+                    g_adcReadings[vc_offset].volt_lower_limit = g_config[vc].min_volt;
+                    g_adcReadings[vc_offset].volt_upper_limit = g_config[vc].max_volt;
+                }
+            }       
+        }
+        
+        do_once = true;
+    }
+}
+
+void handleStopState()
+{
+    const byte new_state[MAX_STOP_STATE] = {START, START, CFG};
+    int curr_selection = 0;
+    bool print_confirmation = false;
+    encoder.setPosition(0);
+    
+    while(STOP == g_currentState)
+    {
+        int selected_state = getRotarySelection(g_newPos, MAX_STOP_STATE);
+        if(selected_state < MAX_STOP_STATE)
+        {
+            if(curr_selection != selected_state)
+            {
+                curr_selection = selected_state;
+                lcd.setCursor(0,1);
+                lcd.print(StoppedStateMsg[curr_selection]);
+            }
+            
+            if(g_switchPressed)
+            {
+                if(!print_confirmation)
+                {
+                    g_switchPressed = false;
+                    lcd.setCursor(0,1);
+                    lcd.print("                ");
+                    lcd.print("Confirm?");
+                    print_confirmation = true;
+                }
+                
+                if(g_switchPressed)
+                {
+                    g_switchPressed = false;
+                    
+                    if(RESUME != curr_selection) //reset LEDS and Buzzer if not resuming
+                    {
+                        g_faultDetected = false;
+                        for(byte chan = 0; chan < MAX_CHANNELS; chan++)
+                        {
+                            toggleLEDs(GRN_LED(chan), HIGH);
+                            toggleLEDs(RED_LED(chan), LOW);
+                        }
+                        ioExp3_U302.digitalWrite0(BUZZER_PIN, HIGH);
+                    }
+                    
+                    g_currentState = new_state[curr_selection];
+                    lcd.clear();
+                }
+            }
+        }
+        
+        delay(DELAY_MS);
+    }
+}
+
+void handleConfigState()
+{
+    bool print_confirmation = false;
+    int group_pos = 0;
+    encoder.setPosition(0);
+    
+    while(CFG == g_currentState)
+    {
+        int selected_group = getRotarySelection(g_newPos, MAX_GROUPING+1); //additional 1 for exit selection
+        if(selected_group < MAX_GROUPING)
+        {
+            if(g_selectGroup != selected_group)
+            {
+                g_selectGroup = selected_group;
+                printGroupProfileSelection();
+                group_pos = g_newPos;
+            }
+            
+            if(g_switchPressed)
+            {
+                g_switchPressed = false;
+                encoder.setPosition(0);
+                
+                bool profile_selected = false;
+                while(false == profile_selected)
+                {
+                    int selected_profile = getRotarySelection(g_newPos, MAX_PROFILE);
+                    if(g_groupProfile[g_selectGroup] != selected_profile)
+                    {
+                        g_groupProfile[g_selectGroup] = selected_profile;
+                        printGroupProfileSelection();
+                    }
+                    
+                    if(g_switchPressed)
+                    {
+                        g_switchPressed = false;
+                        profile_selected = true;
+                        encoder.setPosition(group_pos);
+                    }
+
+                    delay(DELAY_MS);
+                }
+            }
+            print_confirmation = false;
+        }
+        else
+        {
+            if(!print_confirmation)
+            {
+                lcd.setCursor(0,1);
+                lcd.print("                ");
+                lcd.print("Confirm?");
+                print_confirmation = true;
+            }
+            
+            if(g_switchPressed)
+            {
+                g_switchPressed = false;
+                g_currentState = START;
+                lcd.clear();
+            }
+        }
+        
+        delay(DELAY_MS);
+    }
+}
+
+void handleUIRoutine()
+{
+    static byte state = MAX_STATE;
+    
+    if(state != g_currentState)
+    {
+        switch(state)
+        {       
+            case INIT:
+            {
+                //display app title and version
+                displayStartMsg();
+                g_currentState = CFG;
+                break;
+            }
+            
+            case START:
+            {
+                lcd.setCursor(0,0);
+                lcd.print(StateMsg[state]);
+                prepareSensingState();
+                break;
+            }
+            
+            case STOP:
+            {
+                lcd.setCursor(0,0);
+                lcd.print(StateMsg[state]);
+                delay(1000);
+                handleStopState();
+                break;
+            }
+            
+            case ACK:
+            {
+                lcd.setCursor(0,0);
+                lcd.print(StateMsg[state]);
+                delay(1000);
+                g_currentState = START;
+                break;
+            }
+            
+            case CFG:
+            {
+                lcd.setCursor(0,0);
+                lcd.print(StateMsg[state]);
+                handleConfigState();
+                break;
+            }
+            
+            case TEST:
+            {
+                lcd.setCursor(0,0);
+                lcd.print(StateMsg[state]);
+                break;
+            }
+        }
+        
+        state = g_currentState;
+    }
+    
+    yield(); //yield to pass control to other tasks
 }
 
 void setup() 
@@ -267,9 +586,6 @@ void setup()
     lcd.begin(16,2); // sixteen characters across - 2 lines
     lcd.backlight();
     
-    //display app title and version
-    displayStartMsg();
-    
     //initialize the LED pins
     initLEDsOnExpandr(&ioExp1_U300);
     initLEDsOnExpandr(&ioExp2_U301);
@@ -280,54 +596,94 @@ void setup()
     ioExp3_U302.digitalWrite0(BUZZER_PIN, HIGH);
     
     Scheduler.startLoop(pollADC); //read ADC value thread
-    
     Scheduler.startLoop(pollingRotary); //polling rotary knob thread
-    
     Scheduler.startLoop(debounceBtnSWRoutine); //debouncing button switch thread
+    Scheduler.startLoop(handleUIRoutine); //display thread
 }
 
 void loop() 
 {
-    const int FACTOR = 2;
-    for(byte chan = 0; chan < MAX_CHANNELS; chan++)
-    {
-        //get LED mapping
-        int green_led = (chan * FACTOR);
-        int red_led = (chan * FACTOR) + 1;
-            
-        if(0 == g_setLimit)
+    switch(g_currentState)
+    {       
+        case INIT:
         {
-            Serial.print("ADC");
-            Serial.print(chan);
-            Serial.print(":");
-            Serial.println(g_adcReadings[chan]);
-            delay(300);
-            toggleLEDs(green_led, LOW);
-            toggleLEDs(red_led, LOW);
-            ioExp3_U302.digitalWrite0(BUZZER_PIN, LOW);
-            delay(300);
-            toggleLEDs(green_led, HIGH);
-            toggleLEDs(red_led, HIGH);
-            ioExp3_U302.digitalWrite0(BUZZER_PIN, HIGH);
-            delay(300);
-        }
-        else if(INVALID_VOLT != g_setLimit)
-        {
-            //over voltage detected
-            if(g_adcReadings[chan] > VoltLimit[g_setLimit])
+            g_faultDetected = false;
+            for(byte chan = 0; chan < MAX_CHANNELS; chan++)
             {
-                ioExp3_U302.digitalWrite0(BUZZER_PIN, LOW);
-                
-                toggleLEDs(green_led, LOW);
-                toggleLEDs(red_led, HIGH);
+                toggleLEDs(GRN_LED(chan), HIGH);
+                toggleLEDs(RED_LED(chan), LOW);
             }
-            else //normal voltage 
+            break;
+        }
+        
+        case START:
+        {
+            for(byte chan = 0; chan < MAX_CHANNELS; chan++)
+            {
+                //incorrect voltage detected
+                if( (g_adcReadings[chan].chan_val < g_adcReadings[chan].volt_lower_limit) ||
+                    (g_adcReadings[chan].chan_val > g_adcReadings[chan].volt_upper_limit) )
+                {
+                    ioExp3_U302.digitalWrite0(BUZZER_PIN, LOW);
+                    
+                    toggleLEDs(GRN_LED(chan), LOW);
+                    toggleLEDs(RED_LED(chan), HIGH);
+                    g_faultDetected = true;
+                }
+            }
+            
+            if(g_faultDetected && g_switchPressed) //if fault and switch pressed goto ACK
+            {
+                g_switchPressed = false;
+                g_currentState = ACK;
+            }
+            else if(g_switchPressed) //if only switch pressed goto STOP
+            {
+                g_currentState = STOP;
+            }
+            
+            break;
+        }
+        
+        case STOP:
+        {
+            break;
+        }
+        
+        case ACK:
+        {
+            if(g_faultDetected)
             {
                 ioExp3_U302.digitalWrite0(BUZZER_PIN, HIGH);
-                
-                toggleLEDs(red_led, LOW);
-                toggleLEDs(green_led, HIGH);
+                g_faultDetected = false;
             }
+            break;
+        }
+        
+        case CFG:
+        {
+            break;
+        }
+        
+        case TEST:
+        {
+            for(byte chan = 0; chan < MAX_CHANNELS; chan++)
+            {
+                Serial.print("ADC");
+                Serial.print(chan);
+                Serial.print(":");
+                Serial.println(g_adcReadings[chan].chan_val);
+                delay(300);
+                toggleLEDs(GRN_LED(chan), LOW);
+                toggleLEDs(RED_LED(chan), LOW);
+                ioExp3_U302.digitalWrite0(BUZZER_PIN, LOW);
+                delay(300);
+                toggleLEDs(GRN_LED(chan), HIGH);
+                toggleLEDs(RED_LED(chan), HIGH);
+                ioExp3_U302.digitalWrite0(BUZZER_PIN, HIGH);
+                delay(300);
+            }
+            break;
         }
     }
 }
