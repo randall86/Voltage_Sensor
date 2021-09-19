@@ -72,19 +72,19 @@ enum _Stop_states
 
 const char *StateMsg[MAX_STATE] =
 {
-  "Ready",
-  "Sensing...",
-  "Stopped",
-  "Acknowledged",
-  "Configuration",
-  "Testing"
+  "Ready          ",
+  "Sensing...     ",
+  "Stopped        ",
+  "Acknowledged   ",
+  "Configuration  ",
+  "Testing...     "
 };
 
 const char *StoppedStateMsg[MAX_STOP_STATE] =
 {
-  "Resume?",
-  "Reset?",
-  "Reconfigure?"
+  "Resume?        ",
+  "Reset?         ",
+  "Reconfigure?   "
 };
 
 typedef struct _chan_val_limit
@@ -137,7 +137,7 @@ static chan_val_limit_t g_adcReadings[MAX_CHANNELS] = {};
 static byte g_currentState = INIT;
 static bool g_faultDetected = false;
 static int g_newPos = 0;
-static int g_selectGroup = 0;
+static int g_selectGroup = -1;
 static int g_groupProfile[MAX_GROUPING] = {};
 
 //ADC calculated values with 5% tolerance
@@ -160,26 +160,26 @@ static const volt_cfg_t g_config[MAX_CFG] =
 
 static const volt_profile_t g_profile[MAX_PROFILE] =
 {
-    {CFG_10V, CFG_50V},
-    {CFG_10V, CFG_100V},
-    {CFG_25V, CFG_80V},
-    {CFG_25V, CFG_120V},
-    {CFG_50V, CFG_100V},
-    {CFG_50V, CFG_150V}, 
-    {CFG_80V, CFG_200V}, 
-    {CFG_80V, CFG_220V}, 
-    {CFG_100V, CFG_120V}, 
-    {CFG_100V, CFG_200V}, 
-    {CFG_120V, CFG_150V}, 
-    {CFG_120V, CFG_180V},
-    {CFG_150V, CFG_180V},
-    {CFG_150V, CFG_200V}, 
-    {CFG_180V, CFG_200V}, 
-    {CFG_200V, CFG_220V}, 
-    {CFG_220V, CFG_250V}, 
-    {CFG_250V, CFG_280V}, 
-    {CFG_250V, CFG_300V},
-    {CFG_280V, CFG_300V} 
+    {CFG_10V, CFG_50V},     //Profile01
+    {CFG_10V, CFG_100V},    //Profile02
+    {CFG_25V, CFG_80V},     //Profile03
+    {CFG_25V, CFG_120V},    //Profile04
+    {CFG_50V, CFG_100V},    //Profile05
+    {CFG_50V, CFG_150V},    //Profile06
+    {CFG_80V, CFG_200V},    //Profile07
+    {CFG_80V, CFG_220V},    //Profile08
+    {CFG_100V, CFG_120V},   //Profile09
+    {CFG_100V, CFG_200V},   //Profile10
+    {CFG_120V, CFG_150V},   //Profile11
+    {CFG_120V, CFG_180V},   //Profile12
+    {CFG_150V, CFG_180V},   //Profile13
+    {CFG_150V, CFG_200V},   //Profile14
+    {CFG_180V, CFG_200V},   //Profile15
+    {CFG_200V, CFG_220V},   //Profile16
+    {CFG_220V, CFG_250V},   //Profile17
+    {CFG_250V, CFG_280V},   //Profile18
+    {CFG_250V, CFG_300V},   //Profile19
+    {CFG_280V, CFG_300V}    //Profile20
 };
 
 #define FACTOR 2
@@ -334,6 +334,22 @@ void debounceBtnSWRoutine()
     delay(CHECK_MS);
 }
 
+void doInitialization()
+{
+    //clear the fault detect flag
+    g_faultDetected = false;
+    
+    //initialize all LED state to good
+    for(byte chan = 0; chan < MAX_CHANNELS; chan++)
+    {
+        toggleLEDs(GRN_LED(chan), LOW);
+        toggleLEDs(RED_LED(chan), HIGH);
+    }
+    
+    //turn off the fault indication buzzer
+    ioExp3_U302.digitalWrite0(BUZZER_PIN, LOW);
+}
+
 void printGroupProfileSelection()
 {
     char text[16] = {};
@@ -344,47 +360,40 @@ void printGroupProfileSelection()
     lcd.print(text);
 }
 
-void prepareSensingState()
+void updateConfiguration()
 {
-    static bool do_once = false;
-    
-    if(!do_once)
+    //initialize all channel volt limits according to the selected group profile
+    for(byte group = 0; group < MAX_GROUPING; group++)
     {
-        //initialize all channel volt limits according to the selected group profile
-        for(byte group = 0; group < MAX_GROUPING; group++)
+        //get selected profile for group
+        if(g_groupProfile[group] < MAX_PROFILE)
         {
-            //get selected profile for group
-            if(g_groupProfile[group] < MAX_PROFILE)
+            int vb = g_profile[g_groupProfile[group]].vb_profile;
+            int vc = g_profile[g_groupProfile[group]].vc_profile;
+            
+            //assign limit for vb channel in group
+            int vb_offset = (group * 2);
+            if(vb_offset < MAX_CHANNELS)
             {
-                int vb = g_profile[g_groupProfile[group]].vb_profile;
-                int vc = g_profile[g_groupProfile[group]].vc_profile;
-                
-                //assign limit for vb channel in group
-                int vb_offset = (group * 2);
-                if(vb_offset < MAX_CHANNELS)
-                {
-                    g_adcReadings[vb_offset].volt_lower_limit = g_config[vb].min_volt;
-                    g_adcReadings[vb_offset].volt_upper_limit = g_config[vb].max_volt;
-                }
-                
-                //assign limit for vc channel in group
-                int vc_offset = vb_offset + 1;
-                if(vc_offset < MAX_CHANNELS)
-                {
-                    g_adcReadings[vc_offset].volt_lower_limit = g_config[vc].min_volt;
-                    g_adcReadings[vc_offset].volt_upper_limit = g_config[vc].max_volt;
-                }
-            }       
-        }
-        
-        do_once = true;
+                g_adcReadings[vb_offset].volt_lower_limit = g_config[vb].min_volt;
+                g_adcReadings[vb_offset].volt_upper_limit = g_config[vb].max_volt;
+            }
+            
+            //assign limit for vc channel in group
+            int vc_offset = vb_offset + 1;
+            if(vc_offset < MAX_CHANNELS)
+            {
+                g_adcReadings[vc_offset].volt_lower_limit = g_config[vc].min_volt;
+                g_adcReadings[vc_offset].volt_upper_limit = g_config[vc].max_volt;
+            }
+        }       
     }
 }
 
 void handleStopState()
 {
     const byte new_state[MAX_STOP_STATE] = {START, START, CFG};
-    int curr_selection = 0;
+    int curr_selection = -1;
     bool print_confirmation = false;
     encoder.setPosition(0);
     
@@ -405,9 +414,9 @@ void handleStopState()
                 if(!print_confirmation)
                 {
                     g_switchPressed = false;
+                    
                     lcd.setCursor(0,1);
-                    lcd.print("                ");
-                    lcd.print("Confirm?");
+                    lcd.print("Confirm?       ");
                     print_confirmation = true;
                 }
                 
@@ -417,13 +426,7 @@ void handleStopState()
                     
                     if(RESUME != curr_selection) //reset LEDS and Buzzer if not resuming
                     {
-                        g_faultDetected = false;
-                        for(byte chan = 0; chan < MAX_CHANNELS; chan++)
-                        {
-                            toggleLEDs(GRN_LED(chan), HIGH);
-                            toggleLEDs(RED_LED(chan), LOW);
-                        }
-                        ioExp3_U302.digitalWrite0(BUZZER_PIN, HIGH);
+                        doInitialization();
                     }
                     
                     g_currentState = new_state[curr_selection];
@@ -486,14 +489,15 @@ void handleConfigState()
             if(!print_confirmation)
             {
                 lcd.setCursor(0,1);
-                lcd.print("                ");
-                lcd.print("Confirm?");
+                lcd.print("Confirm?       ");
                 print_confirmation = true;
             }
             
             if(g_switchPressed)
             {
                 g_switchPressed = false;
+                
+                updateConfiguration();
                 g_currentState = START;
                 lcd.clear();
             }
@@ -509,13 +513,23 @@ void handleUIRoutine()
     
     if(state != g_currentState)
     {
+        state = g_currentState;
         switch(state)
         {       
             case INIT:
             {
                 //display app title and version
                 displayStartMsg();
-                g_currentState = CFG;
+                if(g_switchPressed)
+                {
+                    g_currentState = TEST;
+                }
+                else
+                {
+                    doInitialization();
+                    g_currentState = CFG;
+                }
+                g_switchPressed = false;
                 break;
             }
             
@@ -523,7 +537,6 @@ void handleUIRoutine()
             {
                 lcd.setCursor(0,0);
                 lcd.print(StateMsg[state]);
-                prepareSensingState();
                 break;
             }
             
@@ -541,7 +554,7 @@ void handleUIRoutine()
                 lcd.setCursor(0,0);
                 lcd.print(StateMsg[state]);
                 delay(1000);
-                g_currentState = START;
+                g_currentState = STOP;
                 break;
             }
             
@@ -560,8 +573,6 @@ void handleUIRoutine()
                 break;
             }
         }
-        
-        state = g_currentState;
     }
     
     yield(); //yield to pass control to other tasks
@@ -593,7 +604,7 @@ void setup()
     
     //initialize the Buzzer
     ioExp3_U302.pinMode0(BUZZER_PIN, LOW);
-    ioExp3_U302.digitalWrite0(BUZZER_PIN, HIGH);
+    ioExp3_U302.digitalWrite0(BUZZER_PIN, LOW);
     
     Scheduler.startLoop(pollADC); //read ADC value thread
     Scheduler.startLoop(pollingRotary); //polling rotary knob thread
@@ -607,12 +618,6 @@ void loop()
     {       
         case INIT:
         {
-            g_faultDetected = false;
-            for(byte chan = 0; chan < MAX_CHANNELS; chan++)
-            {
-                toggleLEDs(GRN_LED(chan), HIGH);
-                toggleLEDs(RED_LED(chan), LOW);
-            }
             break;
         }
         
@@ -624,10 +629,10 @@ void loop()
                 if( (g_adcReadings[chan].chan_val < g_adcReadings[chan].volt_lower_limit) ||
                     (g_adcReadings[chan].chan_val > g_adcReadings[chan].volt_upper_limit) )
                 {
-                    ioExp3_U302.digitalWrite0(BUZZER_PIN, LOW);
+                    ioExp3_U302.digitalWrite0(BUZZER_PIN, HIGH);
                     
-                    toggleLEDs(GRN_LED(chan), LOW);
-                    toggleLEDs(RED_LED(chan), HIGH);
+                    toggleLEDs(GRN_LED(chan), HIGH);
+                    toggleLEDs(RED_LED(chan), LOW);
                     g_faultDetected = true;
                 }
             }
@@ -639,6 +644,7 @@ void loop()
             }
             else if(g_switchPressed) //if only switch pressed goto STOP
             {
+                g_switchPressed = false;
                 g_currentState = STOP;
             }
             
@@ -654,7 +660,7 @@ void loop()
         {
             if(g_faultDetected)
             {
-                ioExp3_U302.digitalWrite0(BUZZER_PIN, HIGH);
+                ioExp3_U302.digitalWrite0(BUZZER_PIN, LOW);
                 g_faultDetected = false;
             }
             break;
@@ -676,14 +682,15 @@ void loop()
                 delay(300);
                 toggleLEDs(GRN_LED(chan), LOW);
                 toggleLEDs(RED_LED(chan), LOW);
-                ioExp3_U302.digitalWrite0(BUZZER_PIN, LOW);
+                ioExp3_U302.digitalWrite0(BUZZER_PIN, HIGH);
                 delay(300);
                 toggleLEDs(GRN_LED(chan), HIGH);
                 toggleLEDs(RED_LED(chan), HIGH);
-                ioExp3_U302.digitalWrite0(BUZZER_PIN, HIGH);
+                ioExp3_U302.digitalWrite0(BUZZER_PIN, LOW);
                 delay(300);
             }
             break;
         }
     }
+    delay(DELAY_MS);
 }
