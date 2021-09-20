@@ -26,6 +26,7 @@ const byte BUZZER_PIN = PIN0_7;
 const int DEBOUNCE_MS = 50;
 const int CHECK_MS = 10;
 const int DELAY_MS = 100;
+const int POLLING_RATE_MS = DELAY_MS*3;
  
 const byte MAX_CHANNELS = 18;
 const byte MAX_LED = MAX_CHANNELS*2;
@@ -435,7 +436,7 @@ void handleStopState()
             }
         }
         
-        delay(DELAY_MS);
+        delay(POLLING_RATE_MS);
     }
 }
 
@@ -503,7 +504,7 @@ void handleConfigState()
             }
         }
         
-        delay(DELAY_MS);
+        delay(POLLING_RATE_MS);
     }
 }
 
@@ -693,5 +694,5 @@ void loop()
             break;
         }
     }
-    delay(DELAY_MS);
+    delay(POLLING_RATE_MS);
 }
