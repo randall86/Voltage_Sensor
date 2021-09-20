@@ -626,8 +626,9 @@ void loop()
             for(byte chan = 0; chan < MAX_CHANNELS; chan++)
             {
                 //incorrect voltage detected
-                if( (g_adcReadings[chan].chan_val < g_adcReadings[chan].volt_lower_limit) ||
-                    (g_adcReadings[chan].chan_val > g_adcReadings[chan].volt_upper_limit) )
+                if( (0 != g_adcReadings[chan].chan_val) &&
+                    ((g_adcReadings[chan].chan_val < g_adcReadings[chan].volt_lower_limit) ||
+                    (g_adcReadings[chan].chan_val > g_adcReadings[chan].volt_upper_limit)) )
                 {
                     ioExp3_U302.digitalWrite0(BUZZER_PIN, HIGH);
                     
