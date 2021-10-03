@@ -31,11 +31,12 @@ const int POLLING_RATE_MS = DELAY_MS*3;
 const byte MAX_CHANNELS = 18;
 const byte MAX_LED = MAX_CHANNELS*2;
 const byte MAX_GROUPING = MAX_CHANNELS/2;
-const byte MAX_PROFILE = 20;
+const byte MAX_PROFILE = 21;
 const byte INVALID_VOLT = 0xFF;
 
 enum _Volt_config
 {
+    CFG_DIS,
     CFG_10V,
     CFG_25V,
     CFG_50V,
@@ -87,6 +88,12 @@ const char *StoppedStateMsg[MAX_STOP_STATE] =
   "Reset?         ",
   "Reconfigure?   "
 };
+
+typedef struct _fault_ack
+{
+    bool fault_detected;
+    bool is_acknowledged;
+}fault_ack_t;
 
 typedef struct _chan_val_limit
 {
@@ -140,10 +147,12 @@ static bool g_faultDetected = false;
 static int g_newPos = 0;
 static int g_selectGroup = -1;
 static int g_groupProfile[MAX_GROUPING] = {};
+static fault_ack_t g_chanFaultAck[MAX_CHANNELS] = {}; 
 
 //ADC calculated values with 5% tolerance
 static const volt_cfg_t g_config[MAX_CFG] =
 {
+    {0, 0},         //0V - disabled
     {32, 36},       //10V
     {81, 90},       //25V
     {162, 179},     //50V
@@ -161,6 +170,7 @@ static const volt_cfg_t g_config[MAX_CFG] =
 
 static const volt_profile_t g_profile[MAX_PROFILE] =
 {
+    {CFG_DIS, CFG_DIS},     //Profile00 - Disable
     {CFG_10V, CFG_50V},     //Profile01
     {CFG_10V, CFG_100V},    //Profile02
     {CFG_25V, CFG_80V},     //Profile03
@@ -262,7 +272,7 @@ void pollingRotary()
 {
     encoder.tick();
     
-    int newPos = encoder.getPosition();
+    int newPos = ((-1)*encoder.getPosition()); //invert +ve to -ve and vice versa
     if (g_newPos != newPos)
     {
         g_newPos = newPos;
@@ -345,6 +355,8 @@ void doInitialization()
     {
         toggleLEDs(GRN_LED(chan), LOW);
         toggleLEDs(RED_LED(chan), HIGH);
+        g_chanFaultAck[chan].is_acknowledged = false;
+        g_chanFaultAck[chan].fault_detected = false;
     }
     
     //turn off the fault indication buzzer
@@ -354,8 +366,17 @@ void doInitialization()
 void printGroupProfileSelection()
 {
     char text[16] = {};
-    //GroupX ProfXX
-    snprintf(text, 16, "Group%d Prof%02d  ", g_selectGroup+1, g_groupProfile[g_selectGroup]+1);
+    
+    if(0 == g_groupProfile[g_selectGroup])
+    {
+        //GroupX Disable
+        snprintf(text, 16, "Group%d Disable ", g_selectGroup+1);
+    }
+    else
+    {
+        //GroupX ProfXX
+        snprintf(text, 16, "Group%d Prof%02d  ", g_selectGroup+1, g_groupProfile[g_selectGroup]);
+    }
     
     lcd.setCursor(0,1);
     lcd.print(text);
@@ -626,8 +647,21 @@ void loop()
         {
             for(byte chan = 0; chan < MAX_CHANNELS; chan++)
             {
+                //disabled
+                if((0 == g_adcReadings[chan].volt_lower_limit) &&
+                        (0 == g_adcReadings[chan].volt_upper_limit))
+                {
+                    toggleLEDs(GRN_LED(chan), HIGH);
+                    toggleLEDs(RED_LED(chan), HIGH);
+                    continue;
+                }
+                //already acknowledged
+                else if(g_chanFaultAck[chan].is_acknowledged)
+                {
+                    continue;
+                }
                 //incorrect voltage detected
-                if( (0 != g_adcReadings[chan].chan_val) &&
+                else if( (0 != g_adcReadings[chan].chan_val) &&
                     ((g_adcReadings[chan].chan_val < g_adcReadings[chan].volt_lower_limit) ||
                     (g_adcReadings[chan].chan_val > g_adcReadings[chan].volt_upper_limit)) )
                 {
@@ -635,6 +669,7 @@ void loop()
                     
                     toggleLEDs(GRN_LED(chan), HIGH);
                     toggleLEDs(RED_LED(chan), LOW);
+                    g_chanFaultAck[chan].fault_detected = true;
                     g_faultDetected = true;
                 }
             }
@@ -662,6 +697,10 @@ void loop()
         {
             if(g_faultDetected)
             {
+                for(byte chan = 0; chan < MAX_CHANNELS; chan++)
+                {
+                    g_chanFaultAck[chan].is_acknowledged = g_chanFaultAck[chan].fault_detected;
+                }
                 ioExp3_U302.digitalWrite0(BUZZER_PIN, LOW);
                 g_faultDetected = false;
             }
