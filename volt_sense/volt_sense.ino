@@ -1,5 +1,5 @@
 // Voltage Sensor System
-// Rev 2.0 (19/09/2021)
+// Rev 2.1 (04/10/2021)
 // - Maxtrax
 
 #include <Adafruit_MCP3008.h>
@@ -9,7 +9,7 @@
 #include <Wire.h>
 #include <Scheduler.h>
 
-const char * app_ver = "v2.0";
+const char * app_ver = "v2.1";
 
 const byte ROTARY_CLK = 3;  //Output A
 const byte ROTARY_DT = 4;   //Output B
