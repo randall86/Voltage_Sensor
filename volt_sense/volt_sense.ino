@@ -1,5 +1,5 @@
 // Voltage Sensor System
-// Rev 2.1 (04/10/2021)
+// Rev 2.2 (10/10/2021)
 // - Maxtrax
 
 #include <Adafruit_MCP3008.h>
@@ -9,7 +9,7 @@
 #include <Wire.h>
 #include <Scheduler.h>
 
-const char * app_ver = "v2.1";
+const char * app_ver = "v2.2";
 
 const byte ROTARY_CLK = 3;  //Output A
 const byte ROTARY_DT = 4;   //Output B
@@ -31,25 +31,35 @@ const int POLLING_RATE_MS = DELAY_MS*3;
 const byte MAX_CHANNELS = 18;
 const byte MAX_LED = MAX_CHANNELS*2;
 const byte MAX_GROUPING = MAX_CHANNELS/2;
-const byte MAX_PROFILE = 21;
+const byte MAX_PROFILE = 26;
 const byte INVALID_VOLT = 0xFF;
 
 enum _Volt_config
 {
     CFG_DIS,
-    CFG_10V,
-    CFG_25V,
+    CFG_0V,
+    CFG_1V,
+    CFG_3V,
+    CFG_4_32V,
+    CFG_5V,
+    CFG_5_5V,
+    CFG_6_5V,
+    CFG_7V,
+    CFG_14V,
+    CFG_16V,
+    CFG_20V,
+    CFG_24V,
+    CFG_32V,
+    CFG_39V,
+    CFG_40V,
+    CFG_45V,
+    CFG_49V,
     CFG_50V,
+    CFG_60V,
+    CFG_75V,
     CFG_80V,
-    CFG_100V,
-    CFG_120V,
-    CFG_150V,
-    CFG_180V,
     CFG_200V,
-    CFG_220V,
-    CFG_250V,
-    CFG_280V,
-    CFG_300V,
+    CFG_320V,
     MAX_CFG
 };
 
@@ -152,45 +162,60 @@ static fault_ack_t g_chanFaultAck[MAX_CHANNELS] = {};
 //ADC calculated values with 5% tolerance
 static const volt_cfg_t g_config[MAX_CFG] =
 {
-    {0, 0},         //0V - disabled
-    {32, 36},       //10V
-    {81, 90},       //25V
-    {162, 179},     //50V
-    {259, 286},     //80V
-    {324, 358},     //100V
-    {389, 430},     //120V
-    {486, 537},     //150V
-    {583, 644},     //180V
-    {648, 716},     //200V
-    {713, 788},     //220V
-    {810, 895},     //250V
-    {907, 1003},    //280V
-    {972, 1023}     //300V
+    {0, 0},         //Disabled
+    {0, 1},         //0V
+    {1, 5},         //1V
+    {7, 13},        //3V
+    {12, 17},       //4.32V
+    {14, 20},       //5V
+    {16, 22},       //5.5V and 5.6V
+    {19, 26},       //6.5V
+    {21, 27},       //7V
+    {43, 53},       //14V
+    {49, 60},       //16V
+    {61, 75},       //20V
+    {74, 90},       //24V
+    {98, 120},      //32V
+    {120, 146},     //39V
+    {123, 150},     //40V
+    {138, 169},     //45V
+    {150, 184},     //49V
+    {153, 188},     //50V
+    {184, 225},     //60V
+    {230, 281},     //75V
+    {246, 300},     //80V
+    {614, 750},     //200V
+    {982, 1023}     //320V
 };
 
 static const volt_profile_t g_profile[MAX_PROFILE] =
 {
-    {CFG_DIS, CFG_DIS},     //Profile00 - Disable
-    {CFG_10V, CFG_50V},     //Profile01
-    {CFG_10V, CFG_100V},    //Profile02
-    {CFG_25V, CFG_80V},     //Profile03
-    {CFG_25V, CFG_120V},    //Profile04
-    {CFG_50V, CFG_100V},    //Profile05
-    {CFG_50V, CFG_150V},    //Profile06
-    {CFG_80V, CFG_200V},    //Profile07
-    {CFG_80V, CFG_220V},    //Profile08
-    {CFG_100V, CFG_120V},   //Profile09
-    {CFG_100V, CFG_200V},   //Profile10
-    {CFG_120V, CFG_150V},   //Profile11
-    {CFG_120V, CFG_180V},   //Profile12
-    {CFG_150V, CFG_180V},   //Profile13
-    {CFG_150V, CFG_200V},   //Profile14
-    {CFG_180V, CFG_200V},   //Profile15
-    {CFG_200V, CFG_220V},   //Profile16
-    {CFG_220V, CFG_250V},   //Profile17
-    {CFG_250V, CFG_280V},   //Profile18
-    {CFG_250V, CFG_300V},   //Profile19
-    {CFG_280V, CFG_300V}    //Profile20
+    {CFG_DIS,   CFG_DIS},   //Profile00 - Disable
+    {CFG_0V,    CFG_4_32V}, //Profile01
+    {CFG_0V,    CFG_6_5V},  //Profile02
+    {CFG_0V,    CFG_200V},  //Profile03
+    {CFG_0V,    CFG_60V},   //Profile04
+    {CFG_1V,    CFG_49V},   //Profile05
+    {CFG_1V,    CFG_45V},   //Profile06
+    {CFG_20V,   CFG_0V},    //Profile07
+    {CFG_0V,    CFG_5V},    //Profile08
+    {CFG_0V,    CFG_20V},   //Profile09
+    {CFG_0V,    CFG_3V},    //Profile10
+    {CFG_0V,    CFG_75V},   //Profile11
+    {CFG_0V,    CFG_5_5V},  //Profile12
+    {CFG_1V,    CFG_39V},   //Profile13
+    {CFG_1V,    CFG_40V},   //Profile14
+    {CFG_1V,    CFG_50V},   //Profile15
+    {CFG_1V,    CFG_14V},   //Profile16
+    {CFG_0V,    CFG_24V},   //Profile17
+    {CFG_1V,    CFG_60V},   //Profile18
+    {CFG_0V,    CFG_320V},  //Profile19
+    {CFG_0V,    CFG_80V},   //Profile20
+    {CFG_16V,   CFG_0V},    //Profile21
+    {CFG_0V,    CFG_24V},   //Profile22
+    {CFG_0V,    CFG_32V},   //Profile23
+    {CFG_5V,    CFG_7V},    //Profile24
+    {CFG_0V,    CFG_5_5V}   //Profile25
 };
 
 #define FACTOR 2
@@ -661,9 +686,8 @@ void loop()
                     continue;
                 }
                 //incorrect voltage detected
-                else if( (0 != g_adcReadings[chan].chan_val) &&
-                    ((g_adcReadings[chan].chan_val < g_adcReadings[chan].volt_lower_limit) ||
-                    (g_adcReadings[chan].chan_val > g_adcReadings[chan].volt_upper_limit)) )
+                else if((g_adcReadings[chan].chan_val < g_adcReadings[chan].volt_lower_limit) ||
+                        (g_adcReadings[chan].chan_val > g_adcReadings[chan].volt_upper_limit))
                 {
                     ioExp3_U302.digitalWrite0(BUZZER_PIN, HIGH);
                     
