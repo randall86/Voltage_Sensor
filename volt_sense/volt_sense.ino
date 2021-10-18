@@ -1,5 +1,5 @@
 // Voltage Sensor System
-// Rev 2.2 (10/10/2021)
+// Rev 2.3 (18/10/2021)
 // - Maxtrax
 
 #include <Adafruit_MCP3008.h>
@@ -9,7 +9,7 @@
 #include <Wire.h>
 #include <Scheduler.h>
 
-const char * app_ver = "v2.2";
+const char * app_ver = "v2.3";
 
 const byte ROTARY_CLK = 3;  //Output A
 const byte ROTARY_DT = 4;   //Output B
@@ -48,6 +48,7 @@ enum _Volt_config
     CFG_14V,
     CFG_16V,
     CFG_20V,
+    CFG_22V,
     CFG_24V,
     CFG_32V,
     CFG_39V,
@@ -163,17 +164,18 @@ static fault_ack_t g_chanFaultAck[MAX_CHANNELS] = {};
 static const volt_cfg_t g_config[MAX_CFG] =
 {
     {0, 0},         //Disabled
-    {0, 1},         //0V
-    {1, 5},         //1V
-    {7, 13},        //3V
-    {12, 17},       //4.32V
+    {0, 7},         //0V
+    {1, 20},         //1V
+    {5, 20},        //3V
+    {10, 20},       //4.32V
     {14, 20},       //5V
-    {16, 22},       //5.5V and 5.6V
-    {19, 26},       //6.5V
+    {16, 21},       //5.5V and 5.6V
+    {19, 24},       //6.5V
     {21, 27},       //7V
     {43, 53},       //14V
     {49, 60},       //16V
     {61, 75},       //20V
+    {68, 83},       //22V
     {74, 90},       //24V
     {98, 120},      //32V
     {120, 146},     //39V
@@ -214,7 +216,7 @@ static const volt_profile_t g_profile[MAX_PROFILE] =
     {CFG_16V,   CFG_0V},    //Profile21
     {CFG_0V,    CFG_24V},   //Profile22
     {CFG_0V,    CFG_32V},   //Profile23
-    {CFG_5V,    CFG_7V},    //Profile24
+    {CFG_0V,    CFG_22V},   //Profile24
     {CFG_0V,    CFG_5_5V}   //Profile25
 };
 
