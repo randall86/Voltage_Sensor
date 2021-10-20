@@ -1,5 +1,5 @@
 // Voltage Sensor System
-// Rev 2.3 (18/10/2021)
+// Rev 2.4 (21/10/2021)
 // - Maxtrax
 
 #include <Adafruit_MCP3008.h>
@@ -8,8 +8,12 @@
 #include <RotaryEncoder.h>
 #include <Wire.h>
 #include <Scheduler.h>
+#include <CSV_Parser.h>
+#include <SPI.h>
+#include <SD.h>
 
-const char * app_ver = "v2.3";
+const char * app_ver = "v2.4";
+const char * cfg_file = "config.csv";
 
 const byte ROTARY_CLK = 3;  //Output A
 const byte ROTARY_DT = 4;   //Output B
@@ -18,10 +22,13 @@ const byte ROTARY_SW = 2;   //Switch
 const byte ADC3_CS = 5;
 const byte ADC2_CS = 6;
 const byte ADC1_CS = 7;
-const byte MOSI_PIN = 8;
-const byte SCK_PIN = 9;
-const byte MISO_PIN = 10;
+const byte ADC_MOSI_PIN = 8;
+const byte ADC_SCK_PIN = 9;
+const byte ADC_MISO_PIN = 10;
+
 const byte BUZZER_PIN = PIN0_7;
+
+const int chipSelect = SDCARD_SS_PIN;
 
 const int DEBOUNCE_MS = 50;
 const int CHECK_MS = 10;
@@ -159,6 +166,7 @@ static int g_newPos = 0;
 static int g_selectGroup = -1;
 static int g_groupProfile[MAX_GROUPING] = {};
 static fault_ack_t g_chanFaultAck[MAX_CHANNELS] = {}; 
+static bool g_storAvai = false;
 
 //ADC calculated values with 5% tolerance
 static const volt_cfg_t g_config[MAX_CFG] =
@@ -409,8 +417,59 @@ void printGroupProfileSelection()
     lcd.print(text);
 }
 
+void removeConfiguration()
+{
+    //remove config file from SD card if available
+    if(true == g_storAvai)
+    {
+        if(SD.exists(cfg_file))
+        {
+            SD.remove(cfg_file);
+        }
+    }
+}
+
+void readConfiguration()
+{
+    // see if the card is present and can be initialized:
+    if (SD.begin(chipSelect)) 
+    {
+        g_storAvai = true;
+        
+        String format = ""; //config data string
+        for(byte column = 0; column < MAX_GROUPING; column++)
+        {
+            format += "d";
+        }
+        
+        // (format, has_header, delimiter); 
+        CSV_Parser cp(format.c_str(), false, ',');
+        
+        // The line below (readSDfile) wouldn't work if SD.begin wasn't called before.
+        // readSDfile can be used as conditional, it returns 'false' if the file does not exist.
+        if (cp.readSDfile(cfg_file))
+        {
+            for(int index = 0; index < cp.getColumnsCount(); index++)
+            {
+                int16_t *column_data = (int16_t*)cp[index];
+                g_groupProfile[index] = column_data[0]; //update the saved profile configuration
+            }
+        }
+        else
+        {
+            Serial.println("Config file does not exist...");
+        }
+    }
+    else
+    {
+        Serial.println("Card failed, or not present");
+    }
+}
+
 void updateConfiguration()
 {
+    String dataString = ""; //config data string
+    
     //initialize all channel volt limits according to the selected group profile
     for(byte group = 0; group < MAX_GROUPING; group++)
     {
@@ -435,7 +494,25 @@ void updateConfiguration()
                 g_adcReadings[vc_offset].volt_lower_limit = g_config[vc].min_volt;
                 g_adcReadings[vc_offset].volt_upper_limit = g_config[vc].max_volt;
             }
-        }       
+        } 
+        
+        //form the configured profile for each group separated by comma
+        dataString += String(g_groupProfile[group]);
+        if((group + 1) < MAX_GROUPING)
+        {
+            dataString += ",";
+        }
+    }
+    
+    //save config to SD card if available
+    if(true == g_storAvai)
+    {
+        File dataFile = SD.open(cfg_file, O_WRITE | O_CREAT | O_TRUNC);
+        if(dataFile)
+        {
+            dataFile.println(dataString);
+            dataFile.close();
+        }
     }
 }
 
@@ -619,6 +696,7 @@ void handleUIRoutine()
             {
                 lcd.setCursor(0,0);
                 lcd.print(StateMsg[state]);
+                removeConfiguration();
                 break;
             }
         }
@@ -639,9 +717,9 @@ void setup()
     
     // Software SPI (specify all, use any available digital)
     // (sck, mosi, miso, cs);   
-    adc1_U2.begin(SCK_PIN, MOSI_PIN, MISO_PIN, ADC1_CS);
-    adc2_U3.begin(SCK_PIN, MOSI_PIN, MISO_PIN, ADC2_CS);
-    adc3_U4.begin(SCK_PIN, MOSI_PIN, MISO_PIN, ADC3_CS);
+    adc1_U2.begin(ADC_SCK_PIN, ADC_MOSI_PIN, ADC_MISO_PIN, ADC1_CS);
+    adc2_U3.begin(ADC_SCK_PIN, ADC_MOSI_PIN, ADC_MISO_PIN, ADC2_CS);
+    adc3_U4.begin(ADC_SCK_PIN, ADC_MOSI_PIN, ADC_MISO_PIN, ADC3_CS);
     
     lcd.begin(16,2); // sixteen characters across - 2 lines
     lcd.backlight();
@@ -654,6 +732,9 @@ void setup()
     //initialize the Buzzer
     ioExp3_U302.pinMode0(BUZZER_PIN, LOW);
     ioExp3_U302.digitalWrite0(BUZZER_PIN, LOW);
+    
+    //read for available config
+    readConfiguration();
     
     Scheduler.startLoop(pollADC); //read ADC value thread
     Scheduler.startLoop(pollingRotary); //polling rotary knob thread
