@@ -1,5 +1,5 @@
 // Voltage Sensor System
-// Rev 2.4 (21/10/2021)
+// Rev 2.5 (09/03/2022)
 // - Maxtrax
 
 #include <Adafruit_MCP3008.h>
@@ -12,7 +12,7 @@
 #include <SPI.h>
 #include <SD.h>
 
-const char * app_ver = "v2.4";
+const char * app_ver = "v2.5";
 const char * cfg_file = "config.csv";
 
 const byte ROTARY_CLK = 3;  //Output A
@@ -38,8 +38,11 @@ const int POLLING_RATE_MS = DELAY_MS*3;
 const byte MAX_CHANNELS = 18;
 const byte MAX_LED = MAX_CHANNELS*2;
 const byte MAX_GROUPING = MAX_CHANNELS/2;
-const byte MAX_PROFILE = 26;
+const byte MAX_PROFILE = 27;
+const byte SC_PROFILE = MAX_PROFILE - 1; //Profile26
 const byte INVALID_VOLT = 0xFF;
+
+const int OPAMP_VOLT = 60; //Op-amp ADC reading to indicate short-circuit (0V)
 
 enum _Volt_config
 {
@@ -68,6 +71,7 @@ enum _Volt_config
     CFG_80V,
     CFG_200V,
     CFG_320V,
+    CFG_SC,
     MAX_CFG
 };
 
@@ -173,7 +177,7 @@ static const volt_cfg_t g_config[MAX_CFG] =
 {
     {0, 0},         //Disabled
     {0, 7},         //0V
-    {1, 20},         //1V
+    {1, 20},        //1V
     {5, 20},        //3V
     {10, 20},       //4.32V
     {14, 20},       //5V
@@ -195,7 +199,8 @@ static const volt_cfg_t g_config[MAX_CFG] =
     {230, 281},     //75V
     {246, 300},     //80V
     {614, 750},     //200V
-    {982, 1023}     //320V
+    {982, 1023},    //320V
+    {OPAMP_VOLT, 0} //0V - Op-amp voltage
 };
 
 static const volt_profile_t g_profile[MAX_PROFILE] =
@@ -225,7 +230,8 @@ static const volt_profile_t g_profile[MAX_PROFILE] =
     {CFG_0V,    CFG_24V},   //Profile22
     {CFG_0V,    CFG_32V},   //Profile23
     {CFG_0V,    CFG_22V},   //Profile24
-    {CFG_0V,    CFG_5_5V}   //Profile25
+    {CFG_0V,    CFG_5_5V},  //Profile25
+    {CFG_SC,    CFG_SC}     //Profile26
 };
 
 #define FACTOR 2
@@ -406,6 +412,11 @@ void printGroupProfileSelection()
     {
         //GroupX Disable
         snprintf(text, 16, "Group%d Disable ", g_selectGroup+1);
+    }
+    if(SC_PROFILE == g_groupProfile[g_selectGroup])
+    {
+        //GroupX Short
+        snprintf(text, 16, "Group%d Short   ", g_selectGroup+1);
     }
     else
     {
@@ -594,7 +605,19 @@ void handleConfigState()
                     int selected_profile = getRotarySelection(g_newPos, MAX_PROFILE);
                     if(g_groupProfile[g_selectGroup] != selected_profile)
                     {
-                        g_groupProfile[g_selectGroup] = selected_profile;
+                        if(SC_PROFILE == selected_profile)
+                        {
+                            //if profile select is for SC detection, set all groups to follow suit
+                            for(byte group = 0; group < MAX_GROUPING; group++)
+                            {
+                                g_groupProfile[group] = selected_profile;
+                            }
+                        }
+                        else
+                        {
+                            g_groupProfile[g_selectGroup] = selected_profile;
+                        }
+                        
                         printGroupProfileSelection();
                     }
                     
@@ -762,6 +785,18 @@ void loop()
                     toggleLEDs(GRN_LED(chan), HIGH);
                     toggleLEDs(RED_LED(chan), HIGH);
                     continue;
+                }
+                //short circuit detection board
+                else if((OPAMP_VOLT == g_adcReadings[chan].volt_lower_limit) &&
+                        (0 == g_adcReadings[chan].volt_upper_limit) &&
+                        (g_adcReadings[chan].chan_val < g_adcReadings[chan].volt_lower_limit))
+                {
+                    ioExp3_U302.digitalWrite0(BUZZER_PIN, HIGH);
+                    
+                    toggleLEDs(GRN_LED(chan), HIGH);
+                    toggleLEDs(RED_LED(chan), LOW);
+                    g_chanFaultAck[chan].fault_detected = true;
+                    g_faultDetected = true;
                 }
                 //already acknowledged
                 else if(g_chanFaultAck[chan].is_acknowledged)
